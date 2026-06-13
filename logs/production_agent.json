@@ -3,19 +3,19 @@
     "timestamp": "2026-06-12T18:05:21.002Z",
     "iteration": 1,
     "session_id": "radhika-nexus-550e8400-e29b",
-    "trigger_source": "krittika_ebpf_sensor",
+    "trigger_source": "ebpf_kernel_sensor",
     "telemetry_state": {
-      "target_host": "validator-3.radhikachain.internal",
+      "target_host": "linode-validator-node-03",
       "detected_anomaly": "Unusual binary execution: python3 -c detected in container background",
       "consensus_karma_score": 94.2
     },
-    "mcp_query_executed": "index=krittika_network sourcetype=krittika:ebpf host=validator-3.radhikachain.internal | stats count by process_name",
+    "mcp_query_executed": "index=sovereign_fleet sourcetype=ebpf_kernel_events host=linode-validator-node-03 | stats count by process_name",
     "token_usage": {
       "prompt_tokens": 2150,
       "completion_tokens": 420
     },
     "agent_reasoning": "Telemetry flags anomalous Python process. Although the Proof of Karma score remains within nominal parameters, execution layout violates the immutability policy of the validator container. Escalating to proactive security mitigation.",
-    "action_decided": "activate_xdp",
+    "action_decided": "EXECUTE_XDP_KERNEL_BLOCK",
     "audit_chain": {
       "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
       "current_hash": "a4f89b72c3d18294ebd01e7394c8e12d8f9c013a5b6e7d8c9a0b1c2d3e4f5a6b"
@@ -27,17 +27,17 @@
     "session_id": "radhika-nexus-550e8400-e29b",
     "trigger_source": "internal_loop_verification",
     "telemetry_state": {
-      "target_host": "validator-3.radhikachain.internal",
+      "target_host": "linode-validator-node-03",
       "detected_anomaly": "None. Network path isolated at XDP level.",
       "consensus_karma_score": 98.7
     },
-    "mcp_query_executed": "index=krittika_consensus sourcetype=krittika:ebpf host=validator-3.radhikachain.internal | stats avg(karma_score)",
+    "mcp_query_executed": "index=sovereign_fleet sourcetype=karma_consensus_logs host=linode-validator-node-03 | stats avg(karma_score)",
     "token_usage": {
       "prompt_tokens": 3410,
       "completion_tokens": 280
     },
     "agent_reasoning": "Post-mitigation check verifies the network block successfully isolated the rogue process context. Consensus engine metrics have stabilized and Karma score recovered to 98.7. No further resource adjustments required.",
-    "action_decided": "isolate_node",
+    "action_decided": "VERIFY_AND_CLOSE_CASE",
     "audit_chain": {
       "prev_hash": "a4f89b72c3d18294ebd01e7394c8e12d8f9c013a5b6e7d8c9a0b1c2d3e4f5a6b",
       "current_hash": "9f8e7d6c5b4a3f2e1d0c9b8a7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f"

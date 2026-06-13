@@ -15,6 +15,53 @@ import httpx
 logger = logging.getLogger("krittika.mcp_client")
 
 
+# Production SPL query catalog for the RadhikaChain Sovereign Fleet
+# Each query targets the consolidated sovereign_fleet index
+QUERIES = {
+    "HEALTH_KARMA": (
+        'index=sovereign_fleet sourcetype=karma_consensus_logs '
+        '| stats avg(karma_score) as avg_karma, '
+        '       stdev(karma_score) as sigma_karma '
+        '  by host '
+        '| where avg_karma < 70 OR sigma_karma > 15 '
+        '| eval alert_level="CRITICAL" '
+        '| table host, avg_karma, sigma_karma, alert_level'
+    ),
+    "LATENCY_MESH": (
+        'index=sovereign_fleet sourcetype=ebpf_traffic '
+        '| timechart span=1m avg(network_latency_ms) as latency by source_node '
+        '| where latency > 250 '
+        '| lookup validator_nodes host as source_node OUTPUT cluster_role '
+        '| table _time, source_node, cluster_role, latency'
+    ),
+    "SECURITY_THREAT": (
+        'index=sovereign_fleet sourcetype=ebpf_kernel_events '
+        '| regex process_name="(?i)(bash|sh|nc|nmap|python3 -c)" '
+        '| stats count by host, process_name, user '
+        '| where count > 5 '
+        '| sort - count'
+    ),
+    "CONSENSUS_QUORUM": (
+        'index=sovereign_fleet sourcetype=karma_consensus_logs '
+        '| stats dc(validator_id) as active_validators '
+        '| eval total_validators=7 '
+        '| eval quorum_pct=round(active_validators/total_validators*100,1)'
+    ),
+    "CHAIN_INTEGRITY": (
+        'index=sovereign_fleet sourcetype=krittika:audit '
+        '| sort _time '
+        '| streamstats current=f last(current_hash) as expected_prev_hash '
+        '| eval chain_valid=if(isnull(expected_prev_hash), "GENESIS", '
+        '  if(expected_prev_hash==prev_hash, "VALID", "BROKEN")) '
+        '| stats count as total, '
+        '       count(eval(chain_valid=="VALID")) as valid, '
+        '       count(eval(chain_valid=="BROKEN")) as broken '
+        '| eval integrity_pct=round((valid+genesis)/total*100,2) '
+        '| eval status=if(broken>0, "COMPROMISED", "INTACT")'
+    ),
+}
+
+
 class SplunkMCPClient:
     """
     Client for the official Splunk MCP Server.

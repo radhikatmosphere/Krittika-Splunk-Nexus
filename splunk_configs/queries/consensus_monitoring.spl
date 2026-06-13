@@ -1,6 +1,6 @@
 # Production SPL Queries for Proof of Karma Consensus Monitoring
 # RADHIKATMOSPHERE / Krittika-Splunk Nexus
-# These queries are used by the autonomous agent via Splunk MCP Server
+# Target index: sovereign_fleet (consolidated fleet telemetry)
 #
 # Usage from agent:
 #   result = splunk_client.run_query(QUERIES["consensus_latency_breach"])
@@ -10,7 +10,7 @@
 # Detects when any validator exceeds the latency threshold
 # Returns: validator_id, latency_ms, karma_score, block_height, _time
 ---
-index=krittika_consensus sourcetype=krittika:consensus
+index=sovereign_fleet sourcetype=karma_consensus_logs
 | stats latest(latency_ms) as latency_ms
        latest(karma_score) as karma_score
        latest(block_height) as block_height
@@ -31,7 +31,7 @@ index=krittika_consensus sourcetype=krittika:consensus
 # Identifies validators whose karma is rapidly declining
 # Returns: validator_id, current_karma, previous_karma, karma_delta, trend
 ---
-index=krittika_consensus sourcetype=krittika:consensus
+index=sovereign_fleet sourcetype=karma_consensus_logs
 | streamstats window=5 latest(karma_score) as karma_history
   by validator_id
 | eval karma_now=mvindex(karma_history, -1)
@@ -46,7 +46,7 @@ index=krittika_consensus sourcetype=krittika:consensus
 # Identifies external IPs conducting reconnaissance against the fleet
 # Returns: src_ip, scan_count, ports_targeted, first_seen, last_seen
 ---
-index=krittika_network sourcetype=krittika:ebpf anomaly=port_scan
+index=sovereign_fleet sourcetype=ebpf_traffic anomaly=port_scan
 | stats count as scan_count
        dc(dst_port) as ports_targeted
        min(_time) as first_seen
@@ -63,7 +63,7 @@ index=krittika_network sourcetype=krittika:ebpf anomaly=port_scan
 # Identifies containers approaching or exceeding resource limits
 # Returns: container_name, avg_cpu, max_mem_pct, status, trend
 ---
-index=krittika_metrics sourcetype=krittika:container
+index=sovereign_fleet sourcetype=krittika:container
 | timechart span=5m avg(cpu_percent) as avg_cpu max(mem_percent) as max_mem by container_name
 | eval saturation=if(avg_cpu > 80 OR max_mem > 90, "SATURATED", if(avg_cpu > 60 OR max_mem > 75, "WARNING", "HEALTHY"))
 | where saturation != "HEALTHY"
@@ -74,7 +74,7 @@ index=krittika_metrics sourcetype=krittika:container
 # Monitors how many validators are actively participating in block attestation
 # Returns: active_validators, total_validators, quorum_pct, block_height
 ---
-index=krittika_consensus sourcetype=krittika:consensus
+index=sovereign_fleet sourcetype=karma_consensus_logs
 | stats dc(validator_id) as active_validators latest(block_height) as block_height
 | eval total_validators=7
 | eval quorum_pct=round(active_validators / total_validators * 100, 1)
@@ -86,8 +86,8 @@ index=krittika_consensus sourcetype=krittika:consensus
 # Joins consensus + network + audit data for correlation analysis
 ---
 | multisearch
-    [search index=krittika_consensus sourcetype=krittika:consensus | stats latest(latency_ms) as latency_ms latest(karma_score) as karma_score | eval source="consensus"]
-    [search index=krittika_network sourcetype=krittika:ebpf anomaly!=none | stats count as threat_count | eval source="network"]
-    [search index=krittika_audit sourcetype=krittika:audit stage=outcome | stats count as audit_entries, latest(status) as last_outcome | eval source="audit"]
+    [search index=sovereign_fleet sourcetype=karma_consensus_logs | stats latest(latency_ms) as latency_ms latest(karma_score) as karma_score | eval source="consensus"]
+    [search index=sovereign_fleet sourcetype=ebpf_traffic anomaly!=none | stats count as threat_count | eval source="network"]
+    [search index=sovereign_fleet sourcetype=krittika:audit stage=outcome | stats count as audit_entries, latest(status) as last_outcome | eval source="audit"]
 | eval timestamp=now()
 | table timestamp, latency_ms, karma_score, threat_count, audit_entries, last_outcome, source

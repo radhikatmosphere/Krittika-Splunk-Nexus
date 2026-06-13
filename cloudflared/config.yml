@@ -39,6 +39,14 @@ ingress:
       connectTimeout: 30s
       keepAliveTimeout: 120s
 
+  # Sovereign Fleet API — live status from the Krittika agent
+  - hostname: api.radhikachain.xyz
+    service: http://krittika-agent:8080
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 10s
+      keepAliveTimeout: 60s
+
   # Health check endpoint for tunnel monitoring
   - hostname: health.radhikachain.xyz
     service: http://splunk-enterprise:8000/en-US/account/login

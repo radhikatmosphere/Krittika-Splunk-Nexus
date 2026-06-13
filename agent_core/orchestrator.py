@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 from .auditor import AuditLogger
 from .remediation_actions import RemediationActions
 from .splunk_mcp_client import SplunkMCPClient
+from .api_server import FleetAPIServer, update_state
 
 load_dotenv()
 
@@ -45,8 +46,9 @@ DEMO_MODE = os.environ.get("DEMO_MODE", "true").lower() == "true"
 # ---------------------------------------------------------------------------
 
 PRODUCTION_QUERIES = {
+    # Existing queries — migrated to sovereign_fleet index
     "consensus_latency_breach": (
-        'index=krittika_consensus sourcetype=krittika:consensus '
+        'index=sovereign_fleet sourcetype=karma_consensus_logs '
         '| stats latest(latency_ms) as latency_ms '
         '       latest(validator_id) as validator_id '
         '       latest(karma_score) as karma_score '
@@ -56,7 +58,7 @@ PRODUCTION_QUERIES = {
         '| sort - latency_ms'
     ),
     "karma_health": (
-        'index=krittika_consensus sourcetype=krittika:consensus '
+        'index=sovereign_fleet sourcetype=karma_consensus_logs '
         '| stats avg(karma_score) as avg_karma '
         '       stdev(karma_score) as sigma_karma '
         '       latest(validator_id) as validator_id '
@@ -66,7 +68,7 @@ PRODUCTION_QUERIES = {
         '| table validator_id, avg_karma, sigma_karma, alert_level'
     ),
     "network_port_scan": (
-        'index=krittika_network sourcetype=krittika:ebpf anomaly=port_scan '
+        'index=sovereign_fleet sourcetype=ebpf_traffic anomaly=port_scan '
         '| stats count as scan_count '
         '       dc(dst_port) as ports_scanned '
         '       values(dst_port) as target_ports '
@@ -75,7 +77,7 @@ PRODUCTION_QUERIES = {
         '| sort - scan_count'
     ),
     "container_saturation": (
-        'index=krittika_metrics sourcetype=krittika:container '
+        'index=sovereign_fleet sourcetype=krittika:container '
         '| stats avg(cpu_percent) as avg_cpu '
         '       max(mem_percent) as max_mem '
         '       latest(container_name) as container_name '
@@ -84,7 +86,7 @@ PRODUCTION_QUERIES = {
         '| sort - avg_cpu'
     ),
     "consensus_quorum": (
-        'index=krittika_consensus sourcetype=krittika:consensus '
+        'index=sovereign_fleet sourcetype=karma_consensus_logs '
         '| stats dc(validator_id) as active_validators '
         '       latest(block_height) as block_height '
         '| eval total_validators=7 '
@@ -93,7 +95,7 @@ PRODUCTION_QUERIES = {
         '  if(quorum_pct >= 57, "DEGRADED", "CRITICAL"))'
     ),
     "chain_hash_integrity": (
-        'index=krittika_audit sourcetype=krittika:audit '
+        'index=sovereign_fleet sourcetype=krittika:audit '
         '| sort _time '
         '| streamstats current=f last(current_hash) as expected_prev_hash '
         '| eval chain_valid=if(isnull(expected_prev_hash), "GENESIS", '
@@ -104,6 +106,30 @@ PRODUCTION_QUERIES = {
         '       count(eval(chain_valid=="GENESIS")) as genesis '
         '| eval integrity_pct=round((valid+genesis)/total*100,2) '
         '| eval status=if(broken>0, "COMPROMISED", "INTACT")'
+    ),
+    # New production SPL queries for Sovereign Fleet
+    "health_karma": (
+        'index=sovereign_fleet sourcetype=karma_consensus_logs '
+        '| stats avg(karma_score) as avg_karma, '
+        '       stdev(karma_score) as sigma_karma '
+        '  by host '
+        '| where avg_karma < 70 OR sigma_karma > 15 '
+        '| eval alert_level="CRITICAL" '
+        '| table host, avg_karma, sigma_karma, alert_level'
+    ),
+    "latency_mesh": (
+        'index=sovereign_fleet sourcetype=ebpf_traffic '
+        '| timechart span=1m avg(network_latency_ms) as latency by source_node '
+        '| where latency > 250 '
+        '| lookup validator_nodes host as source_node OUTPUT cluster_role '
+        '| table _time, source_node, cluster_role, latency'
+    ),
+    "security_threat": (
+        'index=sovereign_fleet sourcetype=ebpf_kernel_events '
+        '| regex process_name="(?i)(bash|sh|nc|nmap|python3 -c)" '
+        '| stats count by host, process_name, user '
+        '| where count > 5 '
+        '| sort - count'
     ),
 }
 
@@ -219,6 +245,11 @@ class KrittikaOrchestrator:
         self.running = False
         self.episode_count = 0
         self.total_decisions = 0
+        self.api_server = FleetAPIServer(
+            host=os.environ.get("API_HOST", "0.0.0.0"),
+            port=int(os.environ.get("API_PORT", "8080")),
+        )
+        self.api_server.start()
 
     async def initialize(self):
         """Set up MCP client and verify connectivity."""
@@ -246,7 +277,7 @@ class KrittikaOrchestrator:
 
         async with self.mcp_client as client:
             result = await client.run_query(
-                'index=* sourcetype="krittika:consensus" '
+                'index=sovereign_fleet sourcetype="karma_consensus_logs" '
                 "| stats latest(latency_ms) as latency_ms, "
                 "latest(validator_id) as validator_id, "
                 "latest(karma_score) as karma_score"
@@ -296,7 +327,7 @@ class KrittikaOrchestrator:
 
         async with self.mcp_client as client:
             result = await client.run_query(
-                'index=* sourcetype="krittika:ebpf" anomaly=* '
+                'index=sovereign_fleet sourcetype="ebpf_traffic" anomaly=* '
                 '| stats count as threat_count'
             )
             if result.get("success") and result.get("result", {}).get("result"):
@@ -447,7 +478,7 @@ class KrittikaOrchestrator:
                 "threshold_threats": THREAT_COUNT_THRESHOLD,
             },
             evidence_reference={
-                "sourcetype": "krittika:consensus",
+                "sourcetype": "karma_consensus_logs",
                 "query": f"validator={validator_id} | stats latest(latency_ms)",
                 "threat_query": f"anomaly=* | stats count",
             },
@@ -493,6 +524,20 @@ class KrittikaOrchestrator:
             },
         )
         logger.info(f"Audit outcome logged: hash={outcome_entry.get('current_hash', '')[:16]}...")
+
+        # Update fleet API state
+        update_state(
+            status="running",
+            episode=self.episode_count,
+            latency_ms=latency_ms,
+            threat_count=threat_count,
+            karma_score=karma_score,
+            validator_id=validator_id,
+            healthy=karma_health.get("healthy", True),
+            last_action=decision["action"],
+            audit_last_hash=self.auditor.last_hash,
+            remediation_summary=self.remediation.get_action_summary(),
+        )
 
         return {
             "episode": self.episode_count,

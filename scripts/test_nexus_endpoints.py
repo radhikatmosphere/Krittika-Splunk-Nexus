@@ -136,10 +136,10 @@ def main():
     print()
 
     # Configuration from environment
-    SPLUNK_WEB_URL = get_env("SPLUNK_WEB_URL", "http://localhost:8000")
-    SPLUNK_HEC_URL = get_env("SPLUNK_HEC_URL", "http://localhost:8088/services/collector")
-    HEC_TOKEN = get_env("SPLUNK_HEC_TOKEN", "")
-    MCP_ENDPOINT = get_env("MCP_ENDPOINT", "http://localhost:8089")
+    SPLUNK_WEB_URL = get_env("SPLUNK_WEB_URL", "https://splunk.radhikachain.xyz")
+    SPLUNK_HEC_URL = get_env("SPLUNK_HEC_URL", "https://hec.radhikachain.xyz/services/collector")
+    HEC_TOKEN = get_env("SPLUNK_HEC_TOKEN", "TU_TOKEN_HEC_AQUÍ")
+    MCP_ENDPOINT = get_env("MCP_ENDPOINT", "https://mcp.radhikachain.xyz")
     MCP_TOKEN = get_env("MCP_TOKEN", "")
 
     print(f"Target Splunk Web: {SPLUNK_WEB_URL}")

@@ -110,6 +110,9 @@ services:
       - LATENCY_THRESHOLD_MS=500
       - THREAT_COUNT_THRESHOLD=3
       - DEMO_MODE=true
+      - API_PORT=8080
+    ports:
+      - "127.0.0.1:8080:8080"   # Fleet API
     volumes:
       - ./splunk_configs/queries:/app/splunk_configs/queries:ro
       - ./logs:/app/logs
