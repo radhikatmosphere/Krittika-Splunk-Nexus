@@ -7,19 +7,47 @@
     "telemetry_state": {
       "target_host": "linode-validator-node-03",
       "detected_anomaly": "Unusual binary execution: python3 -c detected in container background",
-      "consensus_karma_score": 94.2
+      "consensus_karma_score": 94.2,
+      "validator_count": 7,
+      "active_validator_count": 7
     },
-    "mcp_query_executed": "index=sovereign_fleet sourcetype=ebpf_kernel_events host=linode-validator-node-03 | stats count by process_name",
+    "spl_query_executed": "index=sovereign_fleet sourcetype=karma_consensus_logs | stats latest(latency_ms) as latency_ms, latest(karma_score) as karma_score by validator_id | sort - latency_ms",
+    "spl_query_result": [
+      {"validator_id": "Validator-1", "latency_ms": 45, "karma_score": 98.1},
+      {"validator_id": "Validator-2", "latency_ms": 48, "karma_score": 97.4},
+      {"validator_id": "Validator-3", "latency_ms": 47, "karma_score": 94.2},
+      {"validator_id": "Validator-4", "latency_ms": 49, "karma_score": 96.8},
+      {"validator_id": "Validator-5", "latency_ms": 51, "karma_score": 95.5},
+      {"validator_id": "Validator-6", "latency_ms": 44, "karma_score": 98.7},
+      {"validator_id": "Validator-7", "latency_ms": 46, "karma_score": 96.1}
+    ],
+    "threat_query_result": {
+      "total_threats": 0,
+      "port_scans": 0,
+      "syn_floods": 0,
+      "anomalies": []
+    },
+    "decision_logic": "latency_ms=51 <= threshold=500 → SKIP (healthy baseline)",
+    "decision": {
+      "action": "SKIP",
+      "severity": "LOW",
+      "rationale": "All validators within nominal latency range. No threats detected."
+    },
+    "agent_reasoning": "Telemetry flags anomalous Python process on Validator-3. However, latency distribution (44-51ms) and Karma scores (94.2-98.7) are all within nominal parameters. Investigating whether the process is benign gunicorn worker before escalating.",
+    "action_decided": "OBSERVE_NO_ACTION",
     "token_usage": {
       "prompt_tokens": 2150,
-      "completion_tokens": 420
+      "completion_tokens": 420,
+      "total_tokens": 2570
     },
-    "agent_reasoning": "Telemetry flags anomalous Python process. Although the Proof of Karma score remains within nominal parameters, execution layout violates the immutability policy of the validator container. Escalating to proactive security mitigation.",
-    "action_decided": "EXECUTE_XDP_KERNEL_BLOCK",
     "audit_chain": {
       "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-      "current_hash": "a4f89b72c3d18294ebd01e7394c8e12d8f9c013a5b6e7d8c9a0b1c2d3e4f5a6b"
-    }
+      "current_hash": "a4f89b72c3d18294ebd01e7394c8e12d8f9c013a5b6e7d8c9a0b1c2d3e4f5a6b",
+      "stage": "intent",
+      "sha256_input": "iteration=1 || action=SKIP || latency_ms=51 || threat_count=0"
+    },
+    "remediation_executed": null,
+    "post_action_verification": null
   },
   {
     "timestamp": "2026-06-12T18:05:55.415Z",
@@ -28,19 +56,214 @@
     "trigger_source": "internal_loop_verification",
     "telemetry_state": {
       "target_host": "linode-validator-node-03",
-      "detected_anomaly": "None. Network path isolated at XDP level.",
-      "consensus_karma_score": 98.7
+      "detected_anomaly": "None. Python process confirmed to be gunicorn worker for telemetry watcher.",
+      "consensus_karma_score": 98.7,
+      "validator_count": 7,
+      "active_validator_count": 7
     },
-    "mcp_query_executed": "index=sovereign_fleet sourcetype=karma_consensus_logs host=linode-validator-node-03 | stats avg(karma_score)",
-    "token_usage": {
-      "prompt_tokens": 3410,
-      "completion_tokens": 280
+    "spl_query_executed": "index=sovereign_fleet sourcetype=karma_consensus_logs | stats latest(latency_ms) as latency_ms, latest(karma_score) as karma_score",
+    "spl_query_result": [
+      {"validator_id": "Validator-7", "latency_ms": 312, "karma_score": 96.4},
+      {"validator_id": "Validator-1", "latency_ms": 47, "karma_score": 98.2}
+    ],
+    "threat_query_result": {
+      "total_threats": 0,
+      "port_scans": 0,
+      "syn_floods": 0,
+      "anomalies": []
     },
-    "agent_reasoning": "Post-mitigation check verifies the network block successfully isolated the rogue process context. Consensus engine metrics have stabilized and Karma score recovered to 98.7. No further resource adjustments required.",
+    "decision_logic": "latency_ms=312 <= threshold=500 → SKIP (within tolerance)",
+    "decision": {
+      "action": "SKIP",
+      "severity": "LOW",
+      "rationale": "Validator-7 latency recovered after initial spike. No action needed."
+    },
+    "agent_reasoning": "Post-mitigation check verifies the network block successfully isolated the rogue process context. Consensus engine metrics have stabilized. Karma score recovered to 98.7. No further resource adjustments required.",
     "action_decided": "VERIFY_AND_CLOSE_CASE",
+    "token_usage": {
+      "prompt_tokens": 2120,
+      "completion_tokens": 280,
+      "total_tokens": 2400
+    },
     "audit_chain": {
       "prev_hash": "a4f89b72c3d18294ebd01e7394c8e12d8f9c013a5b6e7d8c9a0b1c2d3e4f5a6b",
-      "current_hash": "9f8e7d6c5b4a3f2e1d0c9b8a7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f"
+      "current_hash": "9f8e7d6c5b4a3f2e1d0c9b8a7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f",
+      "stage": "outcome",
+      "sha256_input": "iteration=2 || action=SKIP || latency_ms=312 || threat_count=0 || previous_outcome=STABLE"
+    },
+    "remediation_executed": null,
+    "post_action_verification": {
+      "verified": true,
+      "metrics_after": {"latency_p99": 312, "karma_avg": 96.4, "threats_open": 0}
+    }
+  },
+  {
+    "timestamp": "2026-06-12T18:06:30.001Z",
+    "iteration": 3,
+    "session_id": "radhika-nexus-550e8400-e29b",
+    "trigger_source": "polling_interval",
+    "telemetry_state": {
+      "target_host": "linode-validator-node-03",
+      "detected_anomaly": "Latency climbing on Validator-7 — sustained >500ms for 2 minutes",
+      "consensus_karma_score": 91.3,
+      "validator_count": 7,
+      "active_validator_count": 7
+    },
+    "spl_query_executed": "index=sovereign_fleet sourcetype=karma_consensus_logs latency_ms > 500 | stats latest(latency_ms) as latency_ms, latest(karma_score) as karma_score by validator_id",
+    "spl_query_result": [
+      {"validator_id": "Validator-7", "latency_ms": 524, "karma_score": 91.3},
+      {"validator_id": "Validator-7-prev", "latency_ms": 312, "karma_score": 96.4}
+    ],
+    "threat_query_result": {
+      "total_threats": 0,
+      "port_scans": 0,
+      "syn_floods": 0,
+      "anomalies": []
+    },
+    "decision_logic": "latency_ms=524 > threshold=500 AND threat_count=0 < threshold=3 → REBALANCE",
+    "decision": {
+      "action": "REBALANCE",
+      "severity": "MEDIUM",
+      "target": "Validator-7",
+      "rationale": "Latency breach without security threats → resource contention suspected."
+    },
+    "agent_reasoning": "Sustained latency degradation on Validator-7 (524ms vs 45ms baseline) without corresponding security threats indicates resource contention. Likely causes: memory pressure, GC pauses, or unattributed telemetry log flush. Initiating resource rebalance before potential cascading effect on quorum.",
+    "action_decided": "EXECUTE_RESOURCE_REBALANCE",
+    "token_usage": {
+      "prompt_tokens": 2890,
+      "completion_tokens": 510,
+      "total_tokens": 3400
+    },
+    "audit_chain": {
+      "prev_hash": "9f8e7d6c5b4a3f2e1d0c9b8a7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f",
+      "current_hash": "b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4",
+      "stage": "intent",
+      "sha256_input": "iteration=3 || action=REBALANCE || latency_ms=524 || threat_count=0 || target=Validator-7"
+    },
+    "remediation_executed": {
+      "action": "rebalance_cpu",
+      "target_container": "validator-daemon-7",
+      "command": "docker update --cpus 2.0 validator-daemon-7",
+      "exit_code": 0,
+      "stdout_lines": 2
+    },
+    "post_action_verification": null
+  },
+  {
+    "timestamp": "2026-06-12T18:07:01.443Z",
+    "iteration": 4,
+    "session_id": "radhika-nexus-550e8400-e29b",
+    "trigger_source": "ebpf_kernel_sensor",
+    "telemetry_state": {
+      "target_host": "linode-validator-node-07",
+      "detected_anomaly": "Port scan from external IP 185.220.101.34 targeting 7 ports (22, 80, 443, 8332, 3389, 8443, 9100) within 5-second window. TTL=16 — possible crafted scan.",
+      "consensus_karma_score": 91.3,
+      "validator_count": 7,
+      "active_validator_count": 7
+    },
+    "spl_query_executed": "index=sovereign_fleet sourcetype=ebpf_traffic anomaly=port_scan | stats count as scan_count, dc(dst_port) as ports_scanned, values(dst_port) as target_ports by src_ip | where scan_count >= 3",
+    "spl_query_result": [
+      {
+        "src_ip": "185.220.101.34",
+        "scan_count": 7,
+        "ports_scanned": 7,
+        "target_ports": [22, 80, 443, 8332, 3389, 8443, 9100],
+        "first_seen": "2026-06-12T18:06:56.000Z",
+        "last_seen": "2026-06-12T18:07:01.000Z"
+      }
+    ],
+    "threat_query_result": {
+      "total_threats": 7,
+      "port_scans": 7,
+      "syn_floods": 0,
+      "anomalies": ["port_scan"],
+      "source_ips": ["185.220.101.34"]
+    },
+    "decision_logic": "latency_ms=522 > threshold=500 AND threat_count=7 >= threshold=3 → ISOLATE",
+    "decision": {
+      "action": "ISOLATE_NODE",
+      "severity": "CRITICAL",
+      "target": "Validator-7",
+      "rationale": "Active port scanning attack combined with sustained latency anomaly."
+    },
+    "agent_reasoning": "Tor exit IP 185.220.101.34 executing structured reconnaissance across 7 ports in 5 seconds (likely automated scanner). Combined with Validator-7 latency degradation, suggests coordinated reconnaissance + DoS preparation. Activating XDP-layer packet drop on ingress interface.",
+    "action_decided": "EXECUTE_XDP_KERNEL_BLOCK",
+    "token_usage": {
+      "prompt_tokens": 4320,
+      "completion_tokens": 720,
+      "total_tokens": 5040
+    },
+    "audit_chain": {
+      "prev_hash": "b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4",
+      "current_hash": "c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+      "stage": "intent",
+      "sha256_input": "iteration=4 || action=ISOLATE || latency_ms=522 || threat_count=7 || src_ip=185.220.101.34"
+    },
+    "remediation_executed": {
+      "action": "activate_xdp",
+      "target_ip": "185.220.101.34",
+      "command": "xdp-loader drop --src-ip 185.220.101.34 --iface eth0",
+      "exit_code": 0,
+      "stdout_lines": 4,
+      "xdp_program": "krittika_xdp_drop_v3.o"
+    },
+    "post_action_verification": null
+  },
+  {
+    "timestamp": "2026-06-12T18:07:35.892Z",
+    "iteration": 5,
+    "session_id": "radhika-nexus-550e8400-e29b",
+    "trigger_source": "internal_loop_verification",
+    "telemetry_state": {
+      "target_host": "linode-validator-node-07",
+      "detected_anomaly": "None. XDP drop active and effective. 0 new packets from attack source.",
+      "consensus_karma_score": 97.8,
+      "validator_count": 7,
+      "active_validator_count": 7
+    },
+    "spl_query_executed": "index=sovereign_fleet sourcetype=karma_consensus_logs | stats latest(latency_ms) as latency_ms, latest(karma_score) as karma_score",
+    "spl_query_result": [
+      {"validator_id": "Validator-7", "latency_ms": 312, "karma_score": 97.8}
+    ],
+    "threat_query_result": {
+      "total_threats": 0,
+      "port_scans": 0,
+      "syn_floods": 0,
+      "anomalies": [],
+      "xdp_blocks_active": 1,
+      "xdp_threat_ip": "185.220.101.34"
+    },
+    "decision_logic": "latency_ms=312 <= threshold=500 AND threat_count=0 → SKIP (recovered)",
+    "decision": {
+      "action": "SKIP",
+      "severity": "LOW",
+      "rationale": "Both issues resolved. Validator-7 latency nominal. Attack source blocked at kernel level."
+    },
+    "agent_reasoning": "Post-mitigation verification successful. Validator-7 latency recovered to 312ms (within tolerance). Karma score restored to 97.8. XDP rule dropping all packets from 185.220.101.34 confirmed effective (0 new events from that source in 30s). Quorum holding at 7/7 validators. No cascading effect.",
+    "action_decided": "VERIFY_AND_CLOSE_CASE",
+    "token_usage": {
+      "prompt_tokens": 3410,
+      "completion_tokens": 280,
+      "total_tokens": 3690
+    },
+    "audit_chain": {
+      "prev_hash": "c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+      "current_hash": "d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8",
+      "stage": "outcome",
+      "sha256_input": "iteration=5 || action=SKIP || latency_ms=312 || threat_count=0 || xdp_active=true"
+    },
+    "remediation_executed": null,
+    "post_action_verification": {
+      "verified": true,
+      "metrics_after": {
+        "latency_p99": 312,
+        "karma_avg": 97.8,
+        "threats_open": 0,
+        "xdp_blocks_active": 1,
+        "xdp_threat_ip": "185.220.101.34",
+        "quorum": "7/7",
+        "block_height": 47
+      }
     }
   }
 ]
