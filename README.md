@@ -429,4 +429,3 @@ krittika-splunk-nexus/
 ## License
 
 MIT License. See `LICENSE` for details.
-# Krittika-Splunk-Nexus
