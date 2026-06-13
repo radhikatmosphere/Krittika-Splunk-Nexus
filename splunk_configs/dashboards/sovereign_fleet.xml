@@ -1,0 +1,121 @@
+<dashboard version="1.1" theme="dark">
+  <label>DharmaGate: Sovereign Fleet Autonomy</label>
+  <description>Real-time autonomous oversight dashboard for the RadhikaChain sovereign validator fleet. Neon cyberpunk HUD-style interface for hackathon demonstration.</description>
+
+  <row>
+    <panel>
+      <title>Karma Consensus Health (Real-Time)</title>
+      <chart>
+        <search>
+          <query>index=krittika_consensus sourcetype=krittika:consensus
+| stats avg(karma_score) as avg_karma stdev(karma_score) as sigma_karma by validator_id
+| rangemap field=avg_karma low=0-70 elevated=71-90 default=severe</query>
+          <earliest>-15m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">radialGauge</option>
+        <option name="charting.chart.style">minimal</option>
+        <option name="charting.axisTitleX.visibility">collapsed</option>
+        <option name="charting.fieldColors">{"low":0xFF0000,"elevated":0xFFCC00,"severe":0x00FF00}</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Autonomous Audit Trail (Chain-Hash Verified)</title>
+      <table>
+        <search>
+          <query>index=krittika_audit sourcetype=krittika:audit
+| sort - _time
+| table _time, intent, action, status, current_hash
+| head 20</query>
+          <earliest>-1h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="count">10</option>
+        <format type="color" field="status">
+          <colorPalette type="map">{"SUCCESS":0x00FF00,"FAILED":0xFF0000,"PENDING":0xFFCC00}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Network Mesh Latency (eBPF Telemetry)</title>
+      <chart>
+        <search>
+          <query>index=krittika_network sourcetype=krittika:ebpf
+| timechart span=1m avg(network_latency_ms) as latency by src_ip
+| where latency > 0</query>
+          <earliest>-1h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.seriesColors">[0x00FF00, 0x00FFFF, 0xFF00FF, 0xFFFF00, 0xFF6600, 0x0099FF, 0xCC00FF]</option>
+        <option name="charting.lineStyle">solid</option>
+        <option name="charting.markerStyle">rounded</option>
+        <option name="charting.chart.overlayFields">null</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Validator Health Matrix</title>
+      <table>
+        <search>
+          <query>index=krittika_consensus sourcetype=krittika:consensus
+| stats latest(latency_ms) as latency_ms latest(karma_score) as karma_score latest(block_height) as block_height by validator_id
+| eval health=case(latency_ms &lt; 100, "HEALTHY", latency_ms &lt; 500, "DEGRADED", latency_ms &lt; 1000, "CRITICAL", true(), "OFFLINE")
+| sort - latency_ms</query>
+          <earliest>-1h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="count">10</option>
+        <format type="color" field="health">
+          <colorPalette type="map">{"HEALTHY":0x00FF00,"DEGRADED":0xFFCC00,"CRITICAL":0xFF6600,"OFFLINE":0xFF0000}</colorPalette>
+        </format>
+        <format type="color" field="latency_ms">
+          <colorPalette type="minMidMax" maxColor="0xFF0000" minColor="0x00FF00" midColor="0xFFCC00"></colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Container Resource Saturation</title>
+      <chart>
+        <search>
+          <query>index=krittika_metrics sourcetype=krittika:container
+| timechart span=1m avg(cpu_percent) as avg_cpu max(mem_percent) as max_mem by container_name
+| where avg_cpu &gt; 50 OR max_mem &gt; 70</query>
+          <earliest>-1h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">area</option>
+        <option name="charting.axisY.maximumNumber">100</option>
+        <option name="charting.axisY.minimumNumber">0</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Utilization %</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chain Hash Integrity Status</title>
+      <single>
+        <search>
+          <query>index=krittika_audit sourcetype=krittika:audit
+| streamstats current=f last(current_hash) as expected_prev_hash
+| eval chain_valid=if(isnull(expected_prev_hash), "GENESIS", if(expected_prev_hash==prev_hash, "VALID", "BROKEN"))
+| stats count as total count(eval(chain_valid=="VALID" OR chain_valid=="GENESIS")) as valid count(eval(chain_valid=="BROKEN")) as broken
+| eval integrity_pct=round((valid/total)*100,2)
+| table integrity_pct total valid broken</query>
+          <earliest>-1h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="colorBy">value</option>
+        <option name="colorMode">block</option>
+        <option name="rangeColors">["0x00FF00","0xFFCC00","0xFF0000"]</option>
+        <option name="rangeValues">[95,80]</option>
+        <option name="useColors">1</option>
+        <option name="drilldown">all</option>
+      </single>
+    </panel>
+  </row>
+</dashboard>

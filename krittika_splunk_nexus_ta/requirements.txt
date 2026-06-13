@@ -1,0 +1,2 @@
+splunk-add-on-ucc-framework>=5.0.0
+splunk-sdk>=2.0.0

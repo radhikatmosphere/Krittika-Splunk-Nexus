@@ -1,0 +1,123 @@
+<dashboard version="1.1" theme="dark">
+  <label>AI Autonomy Oversight — Audit Dashboard</label>
+  <description>Full audit trail of autonomous agent decisions with chain-hash verification. Every action is cryptographically linked to the previous one, ensuring tamper-proof accountability.</description>
+
+  <row>
+    <panel>
+      <title>Consensus Latency Threshold Monitor</title>
+      <chart>
+        <search>
+          <query>index=krittika_consensus sourcetype=krittika:consensus
+| timechart span=1m avg(latency_ms) as avg_latency
+| eval threshold=500</query>
+          <earliest>-1h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.chart.overlayFields">threshold</option>
+        <option name="charting.fieldColors">{"avg_latency":0x0066CC,"threshold":0xCC0000}</option>
+        <option name="charting.axisTitleY.text">Latency (ms)</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.chart.style">shiny</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>High-Risk Actions (Last 24h)</title>
+      <single>
+        <search>
+          <query>index=krittika_audit sourcetype=krittika:audit
+| search risk_level=high OR action="isolate_node" OR action="restart_service"
+| stats count</query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="colorBy">value</option>
+        <option name="colorMode">block</option>
+        <option name="rangeColors">["0x00CC00","0xFFCC00","0xCC0000"]</option>
+        <option name="rangeValues">[1,5]</option>
+        <option name="useColors">1</option>
+        <option name="drilldown">all</option>
+      </single>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Audit Trail — All Agent Decisions</title>
+      <table>
+        <search>
+          <query>index=krittika_audit sourcetype=krittika:audit
+| sort - _time
+| eval status_color=case(stage=="intent" AND status=="PENDING", "🟡 PENDING", stage=="outcome" AND status=="SUCCESS", "🟢 SUCCESS", stage=="outcome" AND status=="FAILED", "🔴 FAILED", true(), "⚪ " . status)
+| table _time, session_id, sequence_num, stage, status_color, action, prev_hash, current_hash</query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="count">50</option>
+        <option name="drilldown">row</option>
+        <option name="wrap">true</option>
+        <format type="color" field="status_color">
+          <colorPalette type="map">{"🟢 SUCCESS":#00CC00,"🔴 FAILED":#CC0000,"🟡 PENDING":#FFCC00}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Chain Hash Integrity Verification</title>
+      <table>
+        <search>
+          <query>index=krittika_audit sourcetype=krittika:audit
+| sort _time
+| streamstats current=f last(current_hash) as expected_prev_hash
+| eval chain_valid=case(isnull(expected_prev_hash), "GENESIS", expected_prev_hash==prev_hash, "VALID", true(), "BROKEN")
+| stats count as total_entries, count(eval(chain_valid=="VALID")) as valid_entries, count(eval(chain_valid=="BROKEN")) as broken_entries, count(eval(chain_valid=="GENESIS")) as genesis_entries
+| eval integrity_pct=round((valid_entries + genesis_entries) / total_entries * 100, 2)
+| eval status=if(broken_entries &gt; 0, "COMPROMISED", "INTACT")</query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <format type="color" field="status">
+          <colorPalette type="map">{"INTACT":#00CC00,"COMPROMISED":#CC0000}</colorPalette>
+        </format>
+        <format type="color" field="integrity_pct">
+          <colorPalette type="minMidMax" maxColor="#00CC00" minColor="#CC0000" midColor="#FFCC00"></colorPalette>
+        </format>
+      </table>
+    </panel>
+    <panel>
+      <title>Decision Timeline — Intent vs. Outcome</title>
+      <chart>
+        <search>
+          <query>index=krittika_audit sourcetype=krittika:audit
+| timechart span=5m count by stage</query>
+          <earliest>-1h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.fieldColors">{"intent":0x0066CC,"outcome":0x00CC66}</option>
+        <option name="charting.legend.placement">bottom</option>
+      </chart>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Session Drill-Down — Full Decision Context</title>
+      <table>
+        <search>
+          <query>index=krittika_audit sourcetype=krittika:audit session_id=$session_id$
+| sort sequence_num
+| table sequence_num, stage, _time, action, status, reasoning_context, evidence_reference, execution_result, health_check, prev_hash, current_hash</query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">cell</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+</dashboard>

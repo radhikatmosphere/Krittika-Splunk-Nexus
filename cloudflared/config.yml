@@ -1,0 +1,54 @@
+# Cloudflare Tunnel Configuration for Krittika-Splunk Nexus
+# Domain: radhikachain.xyz
+# 
+# Setup:
+# 1. Create tunnel: cloudflared tunnel create krittika-nexus
+# 2. Note the Tunnel ID and credentials file path
+# 3. Update this config with the Tunnel ID and credentials file path
+# 4. Run: cloudflared tunnel run krittika-nexus
+# 5. Create DNS records: cloudflared tunnel route dns krittika-nexus splunk.radhikachain.xyz
+#                                     cloudflared tunnel route dns krittika-nexus hec.radhikachain.xyz
+#                                     cloudflared tunnel route dns krittika-nexus mcp.radhikachain.xyz
+
+tunnel: 37edefad-2088-4db9-a655-0fd3f9dfa213
+credentials-file: /home/nonroot/.cloudflared/37edefad-2088-4db9-a655-0fd3f9dfa213.json
+
+# Ingress rules - order matters! First match wins
+ingress:
+  # Splunk Web UI - Main dashboard access
+  - hostname: splunk.radhikachain.xyz
+    service: http://splunk-enterprise:8000
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 30s
+      keepAliveTimeout: 90s
+
+  # HTTP Event Collector (HEC) - Agent audit trail ingestion
+  - hostname: hec.radhikachain.xyz
+    service: http://splunk-enterprise:8088
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 10s
+      keepAliveTimeout: 60s
+
+  # MCP Server - AI Agent communication
+  - hostname: mcp.radhikachain.xyz
+    service: http://splunk-enterprise:8089
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 30s
+      keepAliveTimeout: 120s
+
+  # Health check endpoint for tunnel monitoring
+  - hostname: health.radhikachain.xyz
+    service: http://splunk-enterprise:8000/en-US/account/login
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 5s
+
+  # Catch-all: return 404 for any other hostname
+  - service: http_status:404
+
+# Optional: Warp routing for private network access
+# warp-routing:
+#   enabled: true

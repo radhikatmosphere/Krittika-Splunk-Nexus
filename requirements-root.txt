@@ -1,0 +1,15 @@
+# Root requirements for Krittika-Splunk Nexus
+# Install with: pip install -r requirements-root.txt
+
+# Agent core dependencies
+httpx>=0.27
+pydantic>=2.0
+requests>=2.31
+python-dotenv>=1.0
+mcp>=1.0.0
+
+# Splunk SDK (for HEC and MCP client)
+splunk-sdk>=2.0
+
+# UCC Framework (for building the Splunk add-on)
+splunk-add-on-ucc-framework>=5.0.0

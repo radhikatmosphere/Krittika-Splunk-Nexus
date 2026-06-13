@@ -1,0 +1,127 @@
+# Mega-Compose: RadhikaChain Sovereign Fleet + Krittika Observability Agent
+# Production deployment with real-time Splunk ingestion
+
+version: "3.8"
+
+# ---------------------------------------------------------------------------
+# Shared network: radhikachain-mesh
+# All validators + forwarder + agent communicate over this bridge
+# ---------------------------------------------------------------------------
+networks:
+  radhikachain-mesh:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.0.1.0/24
+
+# ---------------------------------------------------------------------------
+# Splunk Universal Forwarder (one per validator node in production)
+# Lightweight container that tails log files and forwards to Splunk Cloud
+# ---------------------------------------------------------------------------
+services:
+  splunk-universal-forwarder:
+    image: splunk/universalforwarder:latest
+    container_name: krittika-forwarder
+    hostname: forwarder.radhikachain.internal
+    volumes:
+      - /var/log/radhikachain:/var/log/radhikachain:ro
+      - ./splunk_configs/forwarder_outputs.conf:/opt/splunk/etc/system/local/outputs.conf:ro
+      - ./splunk_configs/forwarder_inputs.conf:/opt/splunk/etc/system/local/inputs.conf:ro
+      - forwarder-state:/opt/splunk/var/lib/splunk
+    environment:
+      - SPLUNK_FORWARD_SERVER=prd-p-vce8j.splunkcloud.com:9997
+      - SPLUNK_FORWARD_SERVER_HEC=https://prd-p-vce8j.splunkcloud.com:8088
+      - SPLUNK_USER=splunk
+      - SPLUNK_PASSWORD=${SPLUNK_FORWARDER_PASSWORD:-changeme-forwarder-2026}
+    restart: unless-stopped
+    networks:
+      radhikachain-mesh:
+        ipv4_address: 10.0.1.10
+    healthcheck:
+      test: ["CMD", "splunk", "show", "deployment-client", "status"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # ---------------------------------------------------------------------------
+  # RadhikaChain Validator Node 1 (healthy baseline)
+  # ---------------------------------------------------------------------------
+  validator-1:
+    image: radhikachain/validator:latest
+    container_name: validator-node-1
+    hostname: validator-1.radhikachain.internal
+    volumes:
+      - /var/log/radhikachain:/var/log/radhikachain
+    environment:
+      - VALIDATOR_ID=Validator-1
+      - KARMA_ENGINE_MODE=normal
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    networks:
+      radhikachain-mesh:
+        ipv4_address: 10.0.1.101
+
+  # ---------------------------------------------------------------------------
+  # RadhikaChain Validator Node 7 (the "problem" validator in the demo scenario)
+  # Simulates resource exhaustion and eventual failure
+  # ---------------------------------------------------------------------------
+  validator-7:
+    image: radhikachain/validator:latest
+    container_name: validator-node-7
+    hostname: validator-7.radhikachain.internal
+    volumes:
+      - /var/log/radhikachain:/var/log/radhikachain
+    environment:
+      - VALIDATOR_ID=Validator-7
+      - KARMA_ENGINE_MODE=degraded
+      - SIMULATE_FAILURE=1
+      - LOG_LEVEL=info
+      - MAX_LATENCY_MS=1245
+    restart: unless-stopped
+    networks:
+      radhikachain-mesh:
+        ipv4_address: 10.0.1.107
+
+  # ---------------------------------------------------------------------------
+  # Krittika AI Agent (the orchestrator brain)
+  # Connects to Splunk MCP, runs decision loop, executes remediation
+  # ---------------------------------------------------------------------------
+  krittika-agent:
+    build:
+      context: ./agent_core
+      dockerfile: Dockerfile
+    container_name: krittika-observability-agent
+    depends_on:
+      splunk-universal-forwarder:
+        condition: service_healthy
+    environment:
+      - SPLUNK_HOST=https://prd-p-vce8j.splunkcloud.com
+      - HEC_TOKEN=${HEC_TOKEN}
+      - MCP_ENDPOINT=https://prd-p-vce8j.splunkcloud.com/services/mcp
+      - MCP_TOKEN=${MCP_TOKEN}
+      - AUDIT_INDEX=krittika_audit
+      - POLL_INTERVAL=30
+      - LATENCY_THRESHOLD_MS=500
+      - THREAT_COUNT_THRESHOLD=3
+      - DEMO_MODE=true
+    volumes:
+      - ./splunk_configs/queries:/app/splunk_configs/queries:ro
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      radhikachain-mesh:
+        ipv4_address: 10.0.1.1
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  forwarder-state:

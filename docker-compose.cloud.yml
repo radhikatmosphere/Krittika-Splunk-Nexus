@@ -1,0 +1,160 @@
+# Krittika-Splunk Nexus — Linode Production Deployment with Cloudflare Tunnel
+# Domain: radhikachain.xyz
+# 
+# Architecture:
+#   Cloudflare Edge → cloudflared (tunnel) → splunk-enterprise (8000/8088/8089) → krittika-agent
+#
+# Prerequisites:
+#   1. Cloudflare Tunnel created: `cloudflared tunnel create krittika-nexus`
+#   2. DNS records routed: splunk.radhikachain.xyz, hec.radhikachain.xyz, mcp.radhikachain.xyz
+#   3. Credentials file at ./cloudflared/credentials.json (or mount from host)
+#   4. .env file with all required variables
+
+version: "3.8"
+
+networks:
+  krittika-mesh:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.0.2.0/24
+
+services:
+  # ---------------------------------------------------------------------------
+  # Cloudflare Tunnel (cloudflared)
+  # Provides zero-trust ingress to Splunk Enterprise without open ports
+  # ---------------------------------------------------------------------------
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: krittika-cloudflared
+    hostname: cloudflared.radhikachain.internal
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+      - ./cloudflared/credentials.json:/home/nonroot/.cloudflared/credentials.json:ro
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    restart: unless-stopped
+    networks:
+      krittika-mesh:
+        ipv4_address: 10.0.2.10
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Splunk Enterprise (Self-hosted Indexer + Search Head + MCP Server)
+  # Replaces Splunk Cloud for sovereign data control
+  # ---------------------------------------------------------------------------
+  splunk-enterprise:
+    image: splunk/splunk:latest
+    container_name: krittika-splunk
+    hostname: splunk.radhikachain.internal
+    environment:
+      - SPLUNK_START_ARGS=--accept-license
+      - SPLUNK_PASSWORD=${SPLUNK_PASSWORD:-changeme-splunk-2026}
+      - SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN}
+      - SPLUNK_APPS_URL=https://splunkbase.splunk.com/app/7931/release/9.0.0/download
+    volumes:
+      - splunk-etc:/opt/splunk/etc
+      - splunk-var:/opt/splunk/var
+      - ./splunk_configs/inputs.conf:/opt/splunk/etc/system/local/inputs.conf:ro
+      - ./splunk_configs/indexes.conf:/opt/splunk/etc/system/local/indexes.conf:ro
+      - ./splunk_configs/props.conf:/opt/splunk/etc/system/local/props.conf:ro
+      - ./splunk_configs/transforms.conf:/opt/splunk/etc/system/local/transforms.conf:ro
+      - ./splunk_configs/savedsearches.conf:/opt/splunk/etc/system/local/savedsearches.conf:ro
+    ports:
+      - "127.0.0.1:8000:8000"   # Splunk Web (only localhost, Cloudflare handles external)
+      - "127.0.0.1:8088:8088"   # HEC (only localhost)
+      - "127.0.0.1:8089:8089"   # MCP Server (only localhost)
+      - "127.0.0.1:9997:9997"   # Splunk TCP (only localhost, for Universal Forwarder)
+    restart: unless-stopped
+    networks:
+      krittika-mesh:
+        ipv4_address: 10.0.2.20
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/en-US/account/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  # ---------------------------------------------------------------------------
+  # Krittika AI Agent (Autonomous Observability & Defense Orchestrator)
+  # Connects to local Splunk Enterprise via MCP
+  # ---------------------------------------------------------------------------
+  krittika-agent:
+    build:
+      context: ./agent_core
+      dockerfile: Dockerfile
+    container_name: krittika-observability-agent
+    depends_on:
+      splunk-enterprise:
+        condition: service_healthy
+    environment:
+      - SPLUNK_HOST=http://splunk-enterprise:8089
+      - HEC_TOKEN=${SPLUNK_HEC_TOKEN}
+      - MCP_ENDPOINT=http://splunk-enterprise:8089/services/mcp
+      - MCP_TOKEN=${MCP_TOKEN}
+      - AUDIT_INDEX=krittika_audit
+      - POLL_INTERVAL=30
+      - LATENCY_THRESHOLD_MS=500
+      - THREAT_COUNT_THRESHOLD=3
+      - DEMO_MODE=false
+    volumes:
+      - ./splunk_configs/queries:/app/splunk_configs/queries:ro
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      krittika-mesh:
+        ipv4_address: 10.0.2.30
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ---------------------------------------------------------------------------
+  # Splunk Universal Forwarder (for validator nodes on external hosts)
+  # This runs on each RadhikaChain validator node, NOT on the Linode
+  # Included here for reference - deploy separately on validator hosts
+  # ---------------------------------------------------------------------------
+  # splunk-universal-forwarder:
+  #   image: splunk/universalforwarder:latest
+  #   container_name: krittika-forwarder
+  #   hostname: forwarder.radhikachain.internal
+  #   volumes:
+  #     - /var/log/radhikachain:/var/log/radhikachain:ro
+  #     - ./splunk_configs/forwarder_outputs.conf:/opt/splunk/etc/system/local/outputs.conf:ro
+  #     - ./splunk_configs/forwarder_inputs.conf:/opt/splunk/etc/system/local/inputs.conf:ro
+  #     - forwarder-state:/opt/splunk/var/lib/splunk
+  #   environment:
+  #     - SPLUNK_FORWARD_SERVER=splunk-enterprise:9997
+  #     - SPLUNK_USER=splunk
+  #     - SPLUNK_PASSWORD=${SPLUNK_FORWARDER_PASSWORD:-changeme-forwarder-2026}
+  #   restart: unless-stopped
+  #   networks:
+  #     krittika-mesh:
+  #       ipv4_address: 10.0.2.40
+
+volumes:
+  splunk-etc:
+  splunk-var:
+  # forwarder-state:

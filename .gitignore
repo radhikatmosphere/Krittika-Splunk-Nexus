@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# Docker
+*.tar
+*.tar.gz
+
+# UCC generated output
+output/
+krittika_splunk_nexus_ta/package/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / evidence (sensitive data)
+logs/*.json
+logs/*.log
+data/evidence/*.raw
+data/evidence/*.dd
+data/evidence/*.e01
+
+# Splunk local
+splunk_configs/dashboards/*.bak
+
+# Production telemetry logs
+/var/log/radhikachain/*.log
+
+# Permitir explícitamente el log de ejecución de muestra para el jurado
+!logs/production_agent.json
