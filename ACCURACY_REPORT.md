@@ -85,6 +85,18 @@ Zero. All known issues in the dataset were surfaced by the 8-iteration loop.
 
 ## Hallucination Audit
 
+The agent has **two layers of self-correction**:
+
+### Layer 1: Retry layer (`agent_core/retry.py`)
+Every observation query (latency, threats, karma health) is wrapped in a
+retry-aware client (`SplunkMCPClient.run_query`). The retry layer:
+
+- Classifies MCP errors as **transient** (5xx, 408, 429, connect/timeout) or **permanent** (401, 403, 400, 404, 422, malformed JSON)
+- Retries transients with exponential backoff (default 3 attempts, 2s → 4s → 8s, capped at 60s)
+- Returns immediately on permanent errors (no point burning retry budget on invalid auth or bad queries)
+- Records success-after-retry and permanent-failure statistics for observability
+
+### Layer 2: Decision engine (`agent_core/orchestrator.py` DecisionEngine)
 The agent's `DecisionEngine.evaluate()` enforces:
 ```
 Threshold-based action selection — no LLM-generated output is used
@@ -105,6 +117,27 @@ We tested:
 from agent_core.auditor import verify_chain
 print(verify_chain('logs/production_agent.json'))
 # Output: True (8/8 entries, no broken links)
+```
+
+## Adversarial / Resilience Testing
+
+The self-correction retry layer was stress-tested in `tests/test_retry.py` and
+`tests/test_splunk_mcp_client.py` with mocked failures:
+
+| Failure Mode | Behavior | Tests |
+|--------------|----------|-------|
+| HTTP 503 (backend down) | Retry with backoff, succeed when backend recovers | `test_succeeds_after_transient_burst` |
+| HTTP 503 (persistent) | Retry budget exhausted, raise `TransientError` to caller | `test_exhausts_budget_on_persistent_5xx` |
+| HTTP 401 (no auth) | Raise `PermanentError` immediately, no retry | `test_permanent_error_does_not_retry` |
+| HTTP 429 (rate limit) | Retry with backoff (treated as transient) | `test_transient_5xx_and_friends_raise_transient[429]` |
+| Connection refused | Retry with backoff | `test_connect_error_is_transient` |
+| Timeout | Retry with backoff | `test_timeout_is_transient` |
+| Malformed JSON-RPC response | Distinguish transport (transient) vs semantic (permanent) | `test_jsonrpc_style_error_with_*` |
+
+**55 tests pass**. Run with:
+```bash
+cd Krittika-Splunk-Nexus
+python3 -m pytest tests/ -v
 ```
 
 Integrity proof:

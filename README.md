@@ -97,6 +97,7 @@ source .venv/bin/activate
 
 # Install dependencies
 pip install -r agent_core/requirements.txt
+pip install -r requirements-root.txt  # includes pytest
 
 # Configure environment
 cp .env.example .env
@@ -117,6 +118,30 @@ docker-compose up --build
 ```
 
 ---
+
+## Self-Correction & Resilience
+
+Every observation query is wrapped in a retry layer that distinguishes between **transient** failures (worth retrying) and **permanent** failures (will not get better with retry):
+
+- **Transient** (5xx, 408, 429, connect/timeout) → retried with exponential backoff (default 3 attempts, 2s initial, 60s cap)
+- **Permanent** (401, 403, 400, 404, 422, malformed JSON) → raised immediately, no retry budget burned
+
+| Env Var | Default | Purpose |
+|---------|---------|---------|
+| `KRITTIKA_MAX_RETRIES` | 3 | Max retry attempts |
+| `KRITTIKA_BACKOFF_INITIAL` | 2.0 | Initial backoff (s) |
+| `KRITTIKA_BACKOFF_MAX` | 60.0 | Backoff cap (s) |
+| `KRITTIKA_DISABLE_JITTER` | 0 | Set to `1` for deterministic tests |
+
+## Tests
+
+55 unit tests cover the retry layer + Splunk MCP client integration:
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+Expected: `55 passed in ~2s`. Tests use `KRITTIKA_DISABLE_JITTER=1` for deterministic backoff math.
 
 ## Splunk Configuration
 

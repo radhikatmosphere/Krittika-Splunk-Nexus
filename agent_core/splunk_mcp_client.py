@@ -12,6 +12,14 @@ from typing import Any, Optional
 
 import httpx
 
+from .retry import (
+    PermanentError,
+    RetryPolicy,
+    TransientError,
+    aretry,
+    classify_mcp_error,
+)
+
 logger = logging.getLogger("krittika.mcp_client")
 
 
@@ -82,12 +90,14 @@ class SplunkMCPClient:
         mcp_endpoint: Optional[str] = None,
         mcp_token: Optional[str] = None,
         timeout: float = 60.0,
+        retry_policy: Optional[RetryPolicy] = None,
     ):
         self.mcp_endpoint = mcp_endpoint or os.environ.get(
             "MCP_ENDPOINT", "https://localhost:8089/services/mcp"
         )
         self.mcp_token = mcp_token or os.environ.get("MCP_TOKEN", "")
         self.timeout = timeout
+        self.retry_policy = retry_policy or RetryPolicy()
         self._client: Optional[httpx.AsyncClient] = None
 
     async def __aenter__(self):
@@ -110,6 +120,10 @@ class SplunkMCPClient:
         """
         Call an MCP tool via the streamable HTTP protocol.
         Uses JSON-RPC 2.0 format as specified by the MCP standard.
+
+        On HTTP / network errors, raises TransientError or PermanentError
+        so the caller's retry layer can classify + back off.
+        Returns well-formed success / no-result responses as dicts.
         """
         if not self._client:
             raise RuntimeError("Client not initialized. Use async context manager.")
@@ -127,6 +141,10 @@ class SplunkMCPClient:
 
         try:
             response = await self._client.post("/", json=payload)
+            if response.status_code in (429, 500, 502, 503, 504, 408):
+                raise classify_mcp_error(response.status_code, response.text)
+            if response.status_code in (400, 401, 403, 404, 405, 422):
+                raise classify_mcp_error(response.status_code, response.text)
             response.raise_for_status()
             result = response.json()
 
@@ -136,23 +154,58 @@ class SplunkMCPClient:
 
             return {"success": True, "result": result.get("result", {})}
 
+        except httpx.TimeoutException as e:
+            raise TransientError(f"MCP {tool_name} timeout: {e}") from e
+        except httpx.ConnectError as e:
+            raise TransientError(f"MCP {tool_name} connect error: {e}") from e
         except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error calling {tool_name}: {e.response.status_code}")
-            return {"success": False, "error": str(e)}
+            raise classify_mcp_error(e.response.status_code, e.response.text) from e
+        except (PermanentError, TransientError):
+            raise
         except Exception as e:
-            logger.error(f"Failed to call {tool_name}: {e}")
-            return {"success": False, "error": str(e)}
+            raise TransientError(f"MCP {tool_name} unexpected error: {e}") from e
 
-    async def run_query(self, spl_query: str, earliest: str = "-5m", latest: str = "now") -> dict:
+    async def call_with_retry(
+        self, tool_name: str, arguments: dict, *, policy: Optional[RetryPolicy] = None,
+    ) -> dict:
+        """Call an MCP tool with retry + backoff (self-correction layer).
+
+        Uses the supplied policy (or self.retry_policy) to budget retries
+        and apply exponential backoff. TransientError is retried;
+        PermanentError is raised immediately.
         """
-        Execute a Splunk search query via splunk_run_query tool.
+        p = policy or self.retry_policy
+        return await aretry(
+            lambda: self._call_mcp_tool(tool_name, arguments),
+            policy=p,
+            error_msg=f"MCP {tool_name}",
+        )
+
+    async def run_query(
+        self,
+        spl_query: str,
+        earliest: str = "-5m",
+        latest: str = "now",
+        *,
+        retry: bool = True,
+    ) -> dict:
+        """Execute a Splunk search query via splunk_run_query tool.
+
         Returns structured results for agent reasoning.
+        When retry=True (default), transient MCP failures are retried
+        with exponential backoff via call_with_retry().
         """
-        return await self._call_mcp_tool("splunk_run_query", {
+        call_kwargs = {
             "query": spl_query,
             "earliest": earliest,
             "latest": latest,
-        })
+        }
+        if retry:
+            try:
+                return await self.call_with_retry("splunk_run_query", call_kwargs)
+            except PermanentError:
+                return {"success": False, "error": "permanent MCP failure", "query": spl_query}
+        return await self._call_mcp_tool("splunk_run_query", call_kwargs)
 
     async def get_info(self) -> dict:
         """Get comprehensive Splunk instance information."""

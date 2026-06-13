@@ -27,6 +27,11 @@ from .auditor import AuditLogger
 from .remediation_actions import RemediationActions
 from .splunk_mcp_client import SplunkMCPClient
 from .api_server import FleetAPIServer, update_state
+from .retry import (
+    PermanentError,
+    RetryPolicy,
+    TransientError,
+)
 
 load_dotenv()
 
@@ -267,7 +272,7 @@ class KrittikaOrchestrator:
         Query Splunk for the latest consensus latency metric.
 
         In demo mode, reads from test_datasets/radhikachain_genesis.log.
-        In production mode, uses splunk_run_query via MCP.
+        In production mode, uses splunk_run_query via MCP (with retry).
         """
         if DEMO_MODE:
             return self._demo_query_latency()
@@ -415,10 +420,43 @@ class KrittikaOrchestrator:
             "total_checked": len(validator_stats),
         }
 
+    async def _observe_with_retry(self, query_fn):
+        """Self-correction wrapper: run an observation query, applying RetryPolicy.
+
+        If the query raises PermanentError (e.g., 401 unauth, 400 bad query),
+        it is raised to the caller — the episode cannot continue without
+        valid observation data.
+
+        If the query raises TransientError (e.g., 503 backend unavailable),
+        the retry layers in splunk_mcp_client.run_query have already applied
+        backoff. As a last-resort, if the retry layer is exhausted and the
+        underlying query still raises, we raise to the caller and log it.
+        """
+        try:
+            return await query_fn()
+        except PermanentError as e:
+            logger.error(
+                f"[observe] permanent failure on {query_fn.__name__}: {e}",
+                exc_info=True,
+            )
+            raise
+        except TransientError as e:
+            logger.error(
+                f"[observe] retry budget exhausted on {query_fn.__name__}: {e}",
+                exc_info=True,
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"[observe] unexpected error on {query_fn.__name__}: {e}",
+                exc_info=True,
+            )
+            raise
+
     async def run_episode(self):
         """
         Execute one decision episode:
-        1. Observe (query Splunk)
+        1. Observe (query Splunk with self-correction retry on transient errors)
         2. Decide (evaluate metrics)
         3. Log intent (pre-execution audit)
         4. Act (execute remediation)
@@ -429,10 +467,13 @@ class KrittikaOrchestrator:
         logger.info(f"Episode {self.episode_count}")
         logger.info(f"{'='*60}")
 
-        # 1. OBSERVE (Production SPL Queries)
-        latency_data = await self.query_latency()
-        threat_count = await self.query_threats()
-        karma_health = await self.query_karma_health()
+        # 1. OBSERVE (Production SPL Queries with retry-aware self-correction)
+        # All three queries run via asymmetric try/except: PermanentError
+        # halts the episode (no point retrying), TransientError is handled
+        # by the retry layer inside query_*
+        latency_data = await self._observe_with_retry(self.query_latency)
+        threat_count = await self._observe_with_retry(self.query_threats)
+        karma_health = await self._observe_with_retry(self.query_karma_health)
 
         latency_ms = latency_data.get("latency_ms", 0)
         validator_id = latency_data.get("validator_id", "unknown")

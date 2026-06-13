@@ -13,3 +13,6 @@ splunk-sdk>=2.0
 
 # UCC Framework (for building the Splunk add-on)
 splunk-add-on-ucc-framework>=5.0.0
+
+# Test framework (self-correction / retry layer)
+pytest>=8.0
