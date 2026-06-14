@@ -121,10 +121,26 @@ docker-compose up --build
 
 ## Self-Correction & Resilience
 
+The agent has **three self-correction layers**:
+
+### 1. Transport retry (transient HTTP / network failures)
 Every observation query is wrapped in a retry layer that distinguishes between **transient** failures (worth retrying) and **permanent** failures (will not get better with retry):
 
 - **Transient** (5xx, 408, 429, connect/timeout) → retried with exponential backoff (default 3 attempts, 2s initial, 60s cap)
 - **Permanent** (401, 403, 400, 404, 422, malformed JSON) → raised immediately, no retry budget burned
+
+### 2. SPL schema self-correction (LLM-hallucinated field names)
+When the agent (or LLM) generates an SPL query with a wrong field name, Splunk returns:
+```
+Error: Field 'process' does not exist. Did you mean 'process_name'?
+```
+`SplunkMCPClient.run_query_with_autofix()` parses the error, swaps `process=` → `process_name=` (using the `FIELD_ALIASES` table that mirrors the canonical schema in `splunk_configs/props.conf` + `transforms.conf`), and re-submits the query. **No LLM roundtrip required.**
+
+### 3. Ethical decision gates (Sankrit Suma Cero principles)
+Implemented in `agent_core/ethics.py`:
+- **Ahimsa (Fail-open)** — Block-and-isolate actions require multi-signal consensus. No consensus → demote to INVESTIGATE_DEEP, never auto-block.
+- **Karma Temporal (TTL redemption)** — Every blocking action has a TTL: `ISOLATE_NODE=24h`, `QUARANTINE_PROCESS=6h`, `ACTIVATE_XDP_BLOCK=12h`. After TTL, the system re-evaluates and lifts the block.
+- **Shunyata (Non-punitive)** — Decisions containing `kill_host`, `wipe_disk`, etc. are automatically demoted to `QUARANTINE_PROCESS`.
 
 | Env Var | Default | Purpose |
 |---------|---------|---------|
@@ -132,16 +148,17 @@ Every observation query is wrapped in a retry layer that distinguishes between *
 | `KRITTIKA_BACKOFF_INITIAL` | 2.0 | Initial backoff (s) |
 | `KRITTIKA_BACKOFF_MAX` | 60.0 | Backoff cap (s) |
 | `KRITTIKA_DISABLE_JITTER` | 0 | Set to `1` for deterministic tests |
+| `NVIDIA_API_KEY` | unset | NVIDIA NIM key for LLM-driven reasoning; falls back to heuristic |
 
 ## Tests
 
-55 unit tests cover the retry layer + Splunk MCP client integration:
+89 unit tests cover retry, autofix, and ethics:
 
 ```bash
 python3 -m pytest tests/ -v
 ```
 
-Expected: `55 passed in ~2s`. Tests use `KRITTIKA_DISABLE_JITTER=1` for deterministic backoff math.
+Expected: `89 passed in ~4s`. Tests use `KRITTIKA_DISABLE_JITTER=1` for deterministic backoff math.
 
 ## Splunk Configuration
 
